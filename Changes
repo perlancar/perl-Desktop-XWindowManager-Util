@@ -1,3 +1,11 @@
+0.003   2026-04-15  Released-By: PERLANCAR; Urgency: medium
+
+        - list_xwm_windows: Allow returning multiple KDE activity names as array.
+
+        - move_windows_to_kde_activity: Support moving windows to multiple KDE
+          activities.
+
+
 0.002   2026-04-15  Released-By: PERLANCAR; Urgency: medium
 
         - list_xwm_windows: add argument 'id' to filter by ID.
