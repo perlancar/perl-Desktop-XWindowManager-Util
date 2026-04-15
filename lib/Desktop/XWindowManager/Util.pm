@@ -138,17 +138,19 @@ sub list_xwm_windows {
                 log_warn "Can't get KDE activity for window id %s: %d - %s", $row->{id}, $res_get_act->[0], $res_get_act->[1];
                 last;
             }
-            my $guid = $res_get_act->[2];
+            my $guids = $res_get_act->[2];
+            my @guids = $guids ? (split /,/, $guids) : ();
             my $name;
             if ($args{with_kde_activity_name}) {
                 for my $row (@{ $res_list_kact->[2] }) {
-                    if ($guid && $row->{guid} eq $guid) {
-                        $name = $row->{name};
-                        last;
+                    if (grep { $_ eq $row->{guid} } @guids) {
+                        $name = defined($name) ?
+                            (ref($name) eq 'ARRAY' ? [@$name, $row->{name}] : [$name, $row->{name}]) :
+                            $row->{name};
                     }
                 }
             }
-            $row->{kde_activity_guid} = $guid if $args{with_kde_activity} || $args{with_kde_activity_guid};
+            $row->{kde_activity_guid} = $guids if $args{with_kde_activity} || $args{with_kde_activity_guid};
             $row->{kde_activity_name} = $name if $args{with_kde_activity_name};
         }
 
@@ -251,9 +253,16 @@ gen_modified_sub(
     output_name => 'move_windows_to_kde_activity',
     base_name => 'list_xwm_windows',
     die => 1,
+    summary => 'Move matching window(s) to a specified KDE activity',
+    description => <<'MARKDOWN',
+
+Moving means the window will not be shown in any other KDE activity aside from
+the specified ones.
+
+MARKDOWN
     add_args => {
         activity_name => {
-            schema => 'kdeactivity::name*',
+            schema => ['array*', of=> 'kdeactivity::name*'],
             req => 1,
             cmdline_aliases => {a=>{}},
         },
@@ -262,22 +271,22 @@ gen_modified_sub(
         my $orig = shift;
         my %args = @_;
 
-        my $activity_name = delete $args{activity_name};
+        my $activity_names = delete $args{activity_name};
+        $activity_names = [$activity_names] unless ref $activity_names eq 'ARRAY';
 
         require Desktop::KDEActivity::Util;
         my $res_list_act = Desktop::KDEActivity::Util::list_kde_activities(detail => 1);
         return [500, "Can't list KDE activities: $res_list_act->[0] - $res_list_act->[1]"]
             unless $res_list_act->[0] == 200;
 
-        my $guid;
+        my @guids;
         for my $row (@{ $res_list_act->[2] }) {
-            if ($row->{name} eq $activity_name) {
-                $guid = $row->{guid};
-                last;
+            if (grep { $_ eq $row->{name} } @$activity_names) {
+                push @guids, $row->{guid};
             }
         }
-        return [404, "Can't find KDE activity named '$activity_name'"]
-            unless $guid;
+        return [404, "Can't find KDE activities named ".join(", ", @$activity_names)]
+            unless @guids;
 
         my $res_list_win = $orig->(%args, detail=>1);
         return [500, "Can't list windows: $res_list_win->[0] - $res_list_win->[1]"]
@@ -286,7 +295,7 @@ gen_modified_sub(
         return [404, "Can't find any matching windows"] unless @{ $res_list_win->[2] };
         for my $win (@{ $res_list_win->[2] }) {
             system "xprop", "-f", "_KDE_NET_WM_ACTIVITIES", "8s", "-id", $win->{id},
-                "-set", "_KDE_NET_WM_ACTIVITIES", $guid;
+                "-set", "_KDE_NET_WM_ACTIVITIES", join(",",@guids);
         }
 
         [200];
