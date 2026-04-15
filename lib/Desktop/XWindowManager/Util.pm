@@ -7,6 +7,7 @@ use Log::ger;
 
 use Exporter qw(import);
 use IPC::System::Options 'system', -log=>1;
+use Perinci::Sub::Util qw(gen_modified_sub);
 
 # AUTHORITY
 # DATE
@@ -15,6 +16,7 @@ use IPC::System::Options 'system', -log=>1;
 
 our @EXPORT_OK = qw(
                        list_xwm_windows
+                       move_windows_to_kde_activity
                );
 
 our %SPEC;
@@ -43,6 +45,11 @@ Queries are matched against window titles, IDs, and KDE activity names & GUIDs
 (if KDE activity names & GUIDs are requested).
 
 MARKDOWN
+            tags => ['category:filtering'],
+        },
+        id => {
+            schema => 'str*',
+            summary => 'Only list window with the specified ID',
             tags => ['category:filtering'],
         },
         detail => {
@@ -146,6 +153,11 @@ sub list_xwm_windows {
         }
 
       FILTER: {
+          ID: {
+                last unless defined $args{id};
+                next LINE unless $row->{id} eq $args{id};
+            }
+
           NEGATIVE_QUERY: {
                 last unless @negative_query;
                 my $match = 1;
@@ -234,6 +246,52 @@ sub get_xwm_window_kde_activity {
         return [200, "OK", $guid];
     }
 }
+
+gen_modified_sub(
+    output_name => 'move_windows_to_kde_activity',
+    base_name => 'list_xwm_windows',
+    die => 1,
+    add_args => {
+        activity_name => {
+            schema => 'kdeactivity::name*',
+            req => 1,
+            cmdline_aliases => {a=>{}},
+        },
+    },
+    wrap_code => sub {
+        my $orig = shift;
+        my %args = @_;
+
+        my $activity_name = delete $args{activity_name};
+
+        require Desktop::KDEActivity::Util;
+        my $res_list_act = Desktop::KDEActivity::Util::list_kde_activities(detail => 1);
+        return [500, "Can't list KDE activities: $res_list_act->[0] - $res_list_act->[1]"]
+            unless $res_list_act->[0] == 200;
+
+        my $guid;
+        for my $row (@{ $res_list_act->[2] }) {
+            if ($row->{name} eq $activity_name) {
+                $guid = $row->{guid};
+                last;
+            }
+        }
+        return [404, "Can't find KDE activity named '$activity_name'"]
+            unless $guid;
+
+        my $res_list_win = $orig->(%args, detail=>1);
+        return [500, "Can't list windows: $res_list_win->[0] - $res_list_win->[1]"]
+            unless $res_list_win->[0] == 200;
+
+        return [404, "Can't find any matching windows"] unless @{ $res_list_win->[2] };
+        for my $win (@{ $res_list_win->[2] }) {
+            system "xprop", "-f", "_KDE_NET_WM_ACTIVITIES", "8s", "-id", $win->{id},
+                "-set", "_KDE_NET_WM_ACTIVITIES", $guid;
+        }
+
+        [200];
+    },
+);
 
 1;
 # ABSTRACT:
