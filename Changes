@@ -1,3 +1,9 @@
+0.004   2026-04-17  Released-By: PERLANCAR; Urgency: medium
+
+        - [func list_xwm_windows] Add filter arguments: kde_activity_name,
+          current_kde_activity.
+
+
 0.003   2026-04-15  Released-By: PERLANCAR; Urgency: medium
 
         - list_xwm_windows: Allow returning multiple KDE activity names as array.
