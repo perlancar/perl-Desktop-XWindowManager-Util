@@ -7,6 +7,7 @@ use Log::ger;
 
 use Exporter qw(import);
 use IPC::System::Options 'system', -log=>1;
+use List::Util qw(any);
 use Perinci::Sub::Util qw(gen_modified_sub);
 
 # AUTHORITY
@@ -52,6 +53,18 @@ MARKDOWN
             summary => 'Only list window with the specified ID',
             tags => ['category:filtering'],
         },
+        kde_activity_name => {
+            schema => ['array*', of=>'kdeactivity::name*'],
+            summary => 'Only list window shown in one the specified KDE activity names',
+            cmdline_aliases => {K=>{}},
+            tags => ['category:filtering'],
+        },
+        current_kde_activity => {
+            schema => 'bool*',
+            summary => 'Only list window shown in the current KDE activity',
+            cmdline_aliases => {k=>{}},
+            tags => ['category:filtering'],
+        },
         detail => {
             schema => 'bool*',
             cmdline_aliases => {l=>{}},
@@ -67,7 +80,6 @@ MARKDOWN
         with_kde_activity_name => {
             summary => 'Show KDE activity name for each window',
             schema => 'bool*',
-            cmdline_aliases => {k=>{}},
         },
     },
     deps => {
@@ -80,7 +92,9 @@ sub list_xwm_windows {
     my $with_kde_activity =
         $args{with_kde_activity} ||
         $args{with_kde_activity_guid} ||
-        $args{with_kde_activity_name};
+        $args{with_kde_activity_name} ||
+        ($args{kde_activity_name} && @{$args{kde_activity_name}}) ||
+        $args{current_kde_activity};
     my $detail = $args{detail};
     $detail //=1 if $with_kde_activity;
 
@@ -112,6 +126,7 @@ sub list_xwm_windows {
             unless $res_list_kact->[0] == 200;
     }
 
+    my $current_kde_activity;
   LINE:
     for my $line (split /^/m, $stdout) {
         my ($id, $desktop, $pid,
@@ -141,24 +156,43 @@ sub list_xwm_windows {
             my $guids = $res_get_act->[2];
             my @guids = $guids ? (split /,/, $guids) : ();
             my $name;
-            if ($args{with_kde_activity_name}) {
-                for my $row (@{ $res_list_kact->[2] }) {
-                    if (grep { $_ eq $row->{guid} } @guids) {
-                        $name = defined($name) ?
-                            (ref($name) eq 'ARRAY' ? [@$name, $row->{name}] : [$name, $row->{name}]) :
-                            $row->{name};
-                    }
+            for my $row (@{ $res_list_kact->[2] }) {
+                if (grep { $_ eq $row->{guid} } @guids) {
+                    $name = defined($name) ?
+                        (ref($name) eq 'ARRAY' ? [@$name, $row->{name}] : [$name, $row->{name}]) :
+                        $row->{name};
                 }
             }
             $row->{kde_activity_guid} = $guids if $args{with_kde_activity} || $args{with_kde_activity_guid};
-            $row->{kde_activity_name} = $name if $args{with_kde_activity_name};
+            $row->{kde_activity_name} = $name if $args{with_kde_activity_name} || $args{kde_activity_name} || $args{current_kde_activity};
         }
 
       FILTER: {
           ID: {
                 last unless defined $args{id};
                 next LINE unless $row->{id} eq $args{id};
-            }
+            } # ID
+
+          KDE_ACTIVITY: {
+                my @win_kde_activities = !defined($row->{kde_activity_name}) ? () :
+                    ref($row->{kde_activity_name}) eq 'ARRAY' ? @{$row->{kde_activity_name}} :
+                    ($row->{kde_activity_name});
+                if ($args{current_kde_activity}) {
+                    unless (defined $current_kde_activity) {
+                        require Desktop::KDEActivity::Util;
+                        my $res = Desktop::KDEActivity::Util::get_current_kde_activity();
+                        return [500, "Can't get current KDE activity: $res->[0] - $res->[1]"]
+                            unless $res->[0] == 200;
+                        $current_kde_activity = $res->[2];
+                    }
+                    next LINE unless any { $_ eq $current_kde_activity } @win_kde_activities;
+                } elsif ($args{kde_activity_name} && @{ $args{kde_activity_name} }) {
+                    next LINE unless any {
+                        my $k = $_;
+                        any { $k eq $_ } @{ $args{kde_activity_name} };
+                    } @win_kde_activities;
+                }
+            } # KDE_ACTIVITY
 
           NEGATIVE_QUERY: {
                 last unless @negative_query;
@@ -173,7 +207,7 @@ sub list_xwm_windows {
                     log_trace "Skipping window id=%s title=<%s>: matches negative query in %s", $row->{id}, $row->{title}, $args{query};
                     next LINE;
                 }
-            }
+            } # NEGATIVE_QUERY
 
           POSITIVE_QUERY: {
                 last unless @positive_query;
@@ -191,7 +225,7 @@ sub list_xwm_windows {
                     log_trace "Skipping window id=%s title=<%s>: does not match all positive query in %s", $row->{id}, $row->{title}, $args{query};
                     next LINE;
                 }
-            } # QUERY
+            } # POSITIVE_QUERY
         } # FILTER
 
         push @rows, $row;
