@@ -293,6 +293,9 @@ gen_modified_sub(
 Moving means the window will not be shown in any other KDE activity aside from
 the specified ones.
 
+By default, windows that are currently showing to all KDE activities are
+excluded. To include them, set the `include_all_activities_windows` option.
+
 MARKDOWN
     add_args => {
         activity_name => {
@@ -302,6 +305,11 @@ MARKDOWN
         all_activities => {
             summary => 'Show window in all KDE activities instead of specific one(s)',
             schema => 'bool*',
+        },
+        include_all_activities_windows => {
+            summary => 'Also move windows that are currently shown to all KDE activities (which are excluded by default)',
+            schema => 'bool*',
+            cmdline_aliases => {A=>{}},
         },
     },
     wrap_code => sub {
@@ -329,12 +337,22 @@ MARKDOWN
                 unless @guids;
         }
 
-        my $res_list_win = $orig->(%args, detail=>1);
+        my $res_list_win = $orig->(
+            %args,
+            detail=>1,
+            with_kde_activity_name => 1,
+        );
         return [500, "Can't list windows: $res_list_win->[0] - $res_list_win->[1]"]
             unless $res_list_win->[0] == 200;
 
         return [404, "Can't find any matching windows"] unless @{ $res_list_win->[2] };
         for my $win (@{ $res_list_win->[2] }) {
+            unless ($args{include_all_activities_windows}) {
+                if (($win->{kde_activity_name} // '') eq '') {
+                    # skip this window because it is displayed to all KDE activities
+                    next;
+                }
+            }
             system "xprop", "-f", "_KDE_NET_WM_ACTIVITIES", "8s", "-id", $win->{id},
                 "-set", "_KDE_NET_WM_ACTIVITIES",
                 ($args{all_activities} ? "" : join(",",@guids));
