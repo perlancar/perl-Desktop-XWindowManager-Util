@@ -297,8 +297,11 @@ MARKDOWN
     add_args => {
         activity_name => {
             schema => ['array*', of=> 'kdeactivity::name*'],
-            req => 1,
             cmdline_aliases => {a=>{}},
+        },
+        all_activities => {
+            summary => 'Show window in all KDE activities instead of specific one(s)',
+            schema => 'bool*',
         },
     },
     wrap_code => sub {
@@ -306,7 +309,9 @@ MARKDOWN
         my %args = @_;
 
         my $activity_names = delete $args{activity_name};
-        $activity_names = [$activity_names] unless ref $activity_names eq 'ARRAY';
+        if (defined $activity_names) {
+            $activity_names = [$activity_names] unless ref $activity_names eq 'ARRAY';
+        }
 
         require Desktop::KDEActivity::Util;
         my $res_list_act = Desktop::KDEActivity::Util::list_kde_activities(detail => 1);
@@ -314,13 +319,15 @@ MARKDOWN
             unless $res_list_act->[0] == 200;
 
         my @guids;
-        for my $row (@{ $res_list_act->[2] }) {
-            if (grep { $_ eq $row->{name} } @$activity_names) {
-                push @guids, $row->{guid};
+        if (defined $activity_names) {
+            for my $row (@{ $res_list_act->[2] }) {
+                if (grep { $_ eq $row->{name} } @$activity_names) {
+                    push @guids, $row->{guid};
+                }
             }
+            return [404, "Can't find KDE activities named ".join(", ", @$activity_names)]
+                unless @guids;
         }
-        return [404, "Can't find KDE activities named ".join(", ", @$activity_names)]
-            unless @guids;
 
         my $res_list_win = $orig->(%args, detail=>1);
         return [500, "Can't list windows: $res_list_win->[0] - $res_list_win->[1]"]
@@ -329,7 +336,8 @@ MARKDOWN
         return [404, "Can't find any matching windows"] unless @{ $res_list_win->[2] };
         for my $win (@{ $res_list_win->[2] }) {
             system "xprop", "-f", "_KDE_NET_WM_ACTIVITIES", "8s", "-id", $win->{id},
-                "-set", "_KDE_NET_WM_ACTIVITIES", join(",",@guids);
+                "-set", "_KDE_NET_WM_ACTIVITIES",
+                ($args{all_activities} ? "" : join(",",@guids));
         }
 
         [200];
