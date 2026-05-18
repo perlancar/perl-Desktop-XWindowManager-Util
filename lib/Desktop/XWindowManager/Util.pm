@@ -344,6 +344,35 @@ MARKDOWN
     },
 );
 
+gen_modified_sub(
+    output_name => 'move_windows_to_this_kde_activity',
+    base_name => 'move_windows_to_kde_activity',
+    die => 1,
+    summary => 'Move matching window(s) to the current KDE activity',
+    description => <<'MARKDOWN',
+
+A simple wrapper for `move_windows_to_kde_activity`, where windows will be moved
+to the current KDE activity.
+
+MARKDOWN
+    delete_args => [
+        'activity_name',
+        'all_activities',
+    ],
+    wrap_code => sub {
+        my $orig = shift;
+        my %args = @_;
+
+        require Desktop::KDEActivity::Util;
+        my $res = Desktop::KDEActivity::Util::get_current_kde_activity();
+        return [500, "Can't get current KDE activity: $res->[0] - $res->[1]"]
+            unless $res->[0] == 200;
+        my $activity_name = $res->[2];
+
+        $orig->(%args, activity_name => $activity_name);
+    },
+);
+
 1;
 # ABSTRACT:
 
